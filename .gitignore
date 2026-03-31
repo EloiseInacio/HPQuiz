@@ -1,0 +1,20 @@
+# Vector store (generated, large)
+chroma_db/
+
+# Source PDF (too large for git, copyrighted)
+harrypotter.pdf
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.bin
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Conda / venv
+*.egg-info/
+dist/
+build/
