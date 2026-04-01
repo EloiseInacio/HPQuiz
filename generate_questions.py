@@ -26,6 +26,7 @@ DEFAULT_K_DIFF    = 100
 DEFAULT_N         = 100
 DEFAULT_THRESHOLD = 1.0  # L2 distance threshold; ~cosine_sim 0.5 for normalised vectors
 EMBED_MODEL       = "all-MiniLM-L6-v2"
+MAX_ANSWER_WORDS  = 20
 
 DIFFICULTY_THRESHOLDS = {"easy": 15, "medium": 5}
 
@@ -53,6 +54,7 @@ CREATE TABLE IF NOT EXISTS questions (
 SYSTEM_PROMPT = (
     "You are a Harry Potter quiz master. "
     "You create quiz questions strictly grounded in the provided book passages. "
+    "Answers must be concise: a name, a place, or a single sentence of at most 15 words. "
     "You must respond using exactly this format, with no other text:\n"
     "Q: <your question>\n"
     "A: <your answer>"
@@ -62,6 +64,7 @@ GENERATION_PROMPT_TEMPLATE = (
     "Context:\n{context}\n\n"
     "Write exactly one {question_type} quiz question about Harry Potter "
     "based on the context above. "
+    "The answer must be a name, a place, or one sentence of at most 15 words. "
     "Use this exact format with no other text:\n"
     "Q: <question>\n"
     "A: <answer>"
@@ -117,6 +120,8 @@ def parse_qa(raw: str) -> tuple | None:
     answer = re.sub(r"<[^>]+>", "", match.group(2)).strip()
 
     if len(question) < 10 or len(answer) < 5:
+        return None
+    if len(answer.split()) > MAX_ANSWER_WORDS:
         return None
 
     return question, answer

@@ -3,7 +3,7 @@ CLAUDE.md
 
 # Generated artifacts
 chroma_db/
-questions.db
+*.db
 
 # Source PDF (too large for git, copyrighted)
 harrypotter.pdf
