@@ -93,3 +93,4 @@ A complete web app version could include:
 ## Disclaimer
 
 This project is a technical and experimental implementation for questionnaire generation based on the *Harry Potter* books. It is not affiliated with, endorsed by, or associated with J.K. Rowling, Warner Bros., or any official Wizarding World entity.
+This project uses the Harry Potter books for retrieval purposes only. It does not provide access to or reproduce copyrighted text.
