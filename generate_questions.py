@@ -13,6 +13,7 @@ import argparse
 import random
 import re
 import sqlite3
+import string
 
 import chromadb
 from sentence_transformers import SentenceTransformer
@@ -30,6 +31,15 @@ MAX_ANSWER_WORDS  = 20
 MIN_QUOTE_WORDS   = 8   # sequences of this many consecutive words trigger the copyright guardrail
 
 DIFFICULTY_THRESHOLDS = {"easy": 15, "medium": 5}
+
+STOPWORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "been", "but", "by",
+    "did", "do", "for", "from", "had", "has", "have", "he", "her",
+    "him", "his", "how", "i", "in", "is", "it", "its", "of", "on",
+    "or", "our", "she", "so", "that", "the", "their", "them", "they",
+    "this", "to", "was", "we", "were", "what", "when", "where", "who",
+    "why", "with", "you", "your",
+})
 
 QUESTION_TYPES = [
     "factual",
@@ -54,19 +64,25 @@ CREATE TABLE IF NOT EXISTS questions (
 
 SYSTEM_PROMPT = (
     "You are a Harry Potter quiz master. "
-    "You create quiz questions strictly grounded in the provided book passages. "
-    "Answers must be concise: a name, a place, or a single sentence of at most 15 words. "
+    "You write quiz questions based exclusively on the passage provided by the user. "
+    "Rules:\n"
+    "- Both the question and the answer must be grounded in the passage. "
+    "Do not use any knowledge outside it.\n"
+    "- The answer must be a word, name, or short phrase that appears in the passage.\n"
+    "- Answers must be at most 15 words.\n"
+    "- If the passage does not contain a clear, answerable fact, output nothing.\n"
     "You must respond using exactly this format, with no other text:\n"
     "Q: <your question>\n"
     "A: <your answer>"
 )
 
 GENERATION_PROMPT_TEMPLATE = (
-    "Context:\n{context}\n\n"
-    "Write exactly one {question_type} quiz question about Harry Potter "
-    "based on the context above. "
-    "The answer must be a name, a place, or one sentence of at most 15 words. "
-    "Use this exact format with no other text:\n"
+    "Passage:\n{context}\n\n"
+    "Using only the passage above, write exactly one {question_type} quiz question. "
+    "The answer must be a word, name, or short phrase taken directly from the passage. "
+    "Do not invent any facts. "
+    "If the passage does not contain a clear fact to ask about, output nothing.\n"
+    "Format (no other text):\n"
     "Q: <question>\n"
     "A: <answer>"
 )
@@ -89,7 +105,7 @@ def get_chunk(collection, chunk_id: int) -> str:
     return collection.get(ids=[str(chunk_id)])["documents"][0]
 
 
-def generate_raw(chunk_text: str, question_type: str, gen, embedder, collection, k_context: int = 1) -> str:
+def generate_raw(chunk_text: str, question_type: str, gen, embedder, collection, k_context: int = 1) -> tuple:
     q_emb = embedder.encode([chunk_text]).tolist()
     results = collection.query(query_embeddings=q_emb, n_results=k_context, include=["documents"])
     related = results["documents"][0]
@@ -106,7 +122,7 @@ def generate_raw(chunk_text: str, question_type: str, gen, embedder, collection,
     # Prime generation with "Q:" so the model is constrained to start with the question.
     # return_full_text=False returns only the generated tokens; we prepend the primer back.
     out = gen(prompt + "Q:", max_new_tokens=192, return_full_text=False)
-    return "Q:" + out[0]["generated_text"].strip()
+    return "Q:" + out[0]["generated_text"].strip(), context
 
 
 def parse_qa(raw: str) -> tuple | None:
@@ -141,6 +157,16 @@ def estimate_difficulty(question: str, embedder, collection, k: int, threshold: 
 
 
 _META_TERMS = frozenset({"context", "passage", "excerpt", "paraphrase", "summarize", "format"})
+
+
+def answer_in_chunk(answer: str, chunk: str) -> bool:
+    """Return True if at least half of the answer's content words appear in the chunk."""
+    table = str.maketrans("", "", string.punctuation)
+    answer_tokens = set(answer.lower().translate(table).split()) - STOPWORDS
+    chunk_tokens  = set(chunk.lower().translate(table).split())
+    if not answer_tokens:
+        return False
+    return len(answer_tokens & chunk_tokens) / len(answer_tokens) >= 0.5
 
 
 def contains_direct_quote(text: str, source_chunk: str, min_words: int = MIN_QUOTE_WORDS) -> bool:
@@ -213,7 +239,7 @@ def main() -> None:
 
         attempts += 1
         question_type = random.choice(QUESTION_TYPES)
-        raw = generate_raw(chunk_text, question_type, gen, embedder, collection)
+        raw, full_context = generate_raw(chunk_text, question_type, gen, embedder, collection)
         parsed = parse_qa(raw)
 
         if parsed is None:
@@ -227,6 +253,10 @@ def main() -> None:
 
         if contains_direct_quote(question, chunk_text) or contains_direct_quote(answer, chunk_text):
             print(f"  [{attempts}] copyright filter")
+            continue
+
+        if not answer_in_chunk(answer, full_context):
+            print(f"  [{attempts}] grounding filter (answer not in context)")
             continue
 
         difficulty, sim_count = estimate_difficulty(question, embedder, collection, k_diff, args.threshold)
