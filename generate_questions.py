@@ -27,6 +27,7 @@ DEFAULT_N         = 100
 DEFAULT_THRESHOLD = 1.0  # L2 distance threshold; ~cosine_sim 0.5 for normalised vectors
 EMBED_MODEL       = "all-MiniLM-L6-v2"
 MAX_ANSWER_WORDS  = 20
+MIN_QUOTE_WORDS   = 8   # sequences of this many consecutive words trigger the copyright guardrail
 
 DIFFICULTY_THRESHOLDS = {"easy": 15, "medium": 5}
 
@@ -142,6 +143,15 @@ def estimate_difficulty(question: str, embedder, collection, k: int, threshold: 
 _META_TERMS = frozenset({"context", "passage", "excerpt", "paraphrase", "summarize", "format"})
 
 
+def contains_direct_quote(text: str, source_chunk: str, min_words: int = MIN_QUOTE_WORDS) -> bool:
+    words = text.lower().split()
+    chunk_lower = source_chunk.lower()
+    return any(
+        " ".join(words[i:i + min_words]) in chunk_lower
+        for i in range(len(words) - min_words + 1)
+    )
+
+
 def is_valid_question(question: str) -> bool:
     q_lower = question.lower()
     if any(term in q_lower for term in _META_TERMS):
@@ -213,6 +223,10 @@ def main() -> None:
         question, answer = parsed
         if not is_valid_question(question):
             print(f"  [{attempts}] quality filter")
+            continue
+
+        if contains_direct_quote(question, chunk_text) or contains_direct_quote(answer, chunk_text):
+            print(f"  [{attempts}] copyright filter")
             continue
 
         difficulty, sim_count = estimate_difficulty(question, embedder, collection, k_diff, args.threshold)
