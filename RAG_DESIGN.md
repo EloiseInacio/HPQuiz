@@ -327,43 +327,6 @@ Each call to `rag_query()` is stateless. Follow-up questions ("What did he do ne
 
 ---
 
-## 8. Swapping to OpenAI
+## 8. Improvements
 
-The pipeline is structured so that the LLM and embedding model are isolated behind two interfaces: `embedder.encode()` and `generator()`. Replacing them with the OpenAI API requires changes in exactly two places.
-
-**Install:**
-```bash
-pip install openai python-dotenv
-```
-
-**Set your key** in `.env`:
-```
-OPENAI_API_KEY=sk-...
-```
-
-**Replace the embedding call:**
-```python
-# Before (local)
-embeddings = embedder.encode(batch).tolist()
-
-# After (OpenAI)
-from openai import OpenAI
-client = OpenAI()
-
-resp = client.embeddings.create(model="text-embedding-3-small", input=batch)
-embeddings = [r.embedding for r in resp.data]
-```
-
-**Replace the generation call:**
-```python
-# Before (local)
-prompt = generator.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-out = generator(prompt, max_new_tokens=256)
-answer = out[0]["generated_text"][len(prompt):].strip()
-
-# After (OpenAI)
-resp = client.chat.completions.create(model="gpt-4o-mini", messages=messages)
-answer = resp.choices[0].message.content
-```
-
-The retrieval logic, chunking, and ChromaDB index are unchanged — you do not need to re-index if you keep the same embedding model (or rebuild the index once with `text-embedding-3-small` if you switch embedding providers).
+HP specific vocabulary: requires vocabulary extension + LLMs finetuning

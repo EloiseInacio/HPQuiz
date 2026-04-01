@@ -1,8 +1,9 @@
 # Claude context (internal tooling)
 CLAUDE.md
 
-# Vector store (generated, large)
+# Generated artifacts
 chroma_db/
+questions.db
 
 # Source PDF (too large for git, copyrighted)
 harrypotter.pdf
