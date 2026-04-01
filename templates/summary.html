@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}⚡ HP Quiz — Results{% endblock %}
+
+{% block content %}
+
+<!-- Score header -->
+<div class="text-center mb-8">
+  <p class="text-6xl font-bold text-yellow-400 mb-2">{{ correct_count }} / {{ total }}</p>
+  <p class="text-2xl text-gray-300 mb-4">{{ pct }}%</p>
+
+  <!-- Score bar -->
+  <div class="w-full bg-gray-800 rounded-full h-4 mb-6">
+    <div class="bg-yellow-400 h-4 rounded-full transition-all"
+         style="width: {{ pct }}%"></div>
+  </div>
+
+  <p class="text-xl font-semibold text-gray-200">{{ message }}</p>
+</div>
+
+<!-- Play again -->
+<a href="/"
+   class="block w-full py-3 text-center bg-yellow-400 hover:bg-yellow-300 text-gray-950
+          font-bold text-lg rounded-xl transition-colors mb-8">
+  Play Again 🔄
+</a>
+
+<!-- Breakdown -->
+<details class="group">
+  <summary class="cursor-pointer text-sm font-semibold text-gray-400 uppercase tracking-widest
+                  hover:text-gray-200 transition-colors mb-4 list-none flex items-center gap-2">
+    <span class="group-open:rotate-90 transition-transform inline-block">▶</span>
+    Question breakdown
+  </summary>
+
+  <div class="mt-4 overflow-x-auto rounded-xl border border-gray-700">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="bg-gray-800 text-gray-400 uppercase tracking-widest text-xs">
+          <th class="px-4 py-3 text-left">Question</th>
+          <th class="px-4 py-3 text-left">Your answer</th>
+          <th class="px-4 py-3 text-left">Correct answer</th>
+          <th class="px-4 py-3 text-center">Result</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-700">
+        {% for r in results %}
+        <tr class="{{ 'bg-red-950/60' if not r.is_correct else 'bg-gray-900' }}">
+          <td class="px-4 py-3 text-gray-200">{{ r.question }}</td>
+          <td class="px-4 py-3 text-gray-400">{{ r.user_answer if r.user_answer else "—" }}</td>
+          <td class="px-4 py-3 text-yellow-300">{{ r.correct_answer }}</td>
+          <td class="px-4 py-3 text-center text-lg">
+            {{ "✅" if r.is_correct else "❌" }}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</details>
+
+{% endblock %}

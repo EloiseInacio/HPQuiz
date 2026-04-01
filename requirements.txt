@@ -5,3 +5,4 @@ tiktoken>=0.7
 transformers>=4.40
 accelerate>=0.30
 torch>=2.2
+flask>=3.0

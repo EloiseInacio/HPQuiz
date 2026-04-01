@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}⚡ HP Quiz — Start{% endblock %}
+
+{% block content %}
+
+{% if flash_message %}
+<div class="mb-6 p-4 bg-red-900/60 border border-red-500 rounded-xl text-red-200">
+  {{ flash_message }}
+</div>
+{% endif %}
+
+<div class="text-center mb-10">
+  <h1 class="text-4xl font-bold text-yellow-400 mb-2">Welcome to HP Quiz! 🧙‍♂️</h1>
+  <p class="text-gray-400">Test your wizarding knowledge. Choose your challenge below.</p>
+</div>
+
+<form method="POST" action="/start" class="space-y-8">
+
+  <!-- Difficulty -->
+  <div>
+    <label class="block text-sm font-semibold text-gray-300 uppercase tracking-widest mb-3">
+      Difficulty
+    </label>
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+
+      {% set badges = [
+        ("easy",   "🟢", "Easy",   "bg-green-900  border-green-600  text-green-200  peer-checked:bg-green-700  peer-checked:border-green-400"),
+        ("medium", "🟡", "Medium", "bg-yellow-900 border-yellow-600 text-yellow-200 peer-checked:bg-yellow-700 peer-checked:border-yellow-400"),
+        ("hard",   "🔴", "Hard",   "bg-red-900    border-red-600    text-red-200    peer-checked:bg-red-700    peer-checked:border-red-400"),
+        ("any",    "⚡", "Any",    "bg-purple-900 border-purple-600 text-purple-200 peer-checked:bg-purple-700 peer-checked:border-purple-400"),
+      ] %}
+
+      {% for value, emoji, label, classes in badges %}
+      <label class="cursor-pointer">
+        <input type="radio" name="difficulty" value="{{ value }}"
+               class="peer sr-only"
+               {% if value == "any" %}checked{% endif %}>
+        <div class="border rounded-xl p-3 text-center transition-all select-none {{ classes }}">
+          <div class="text-xl mb-1">{{ emoji }}</div>
+          <div class="text-sm font-semibold">{{ label }}</div>
+        </div>
+      </label>
+      {% endfor %}
+
+    </div>
+  </div>
+
+  <!-- Number of questions -->
+  <div>
+    <label for="count" class="block text-sm font-semibold text-gray-300 uppercase tracking-widest mb-3">
+      Number of questions
+    </label>
+    <input type="number" id="count" name="count"
+           min="{{ min_q }}" max="{{ max_q }}" value="10"
+           class="w-32 bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-gray-100
+                  focus:outline-none focus:border-yellow-400 transition-colors text-center text-lg">
+    <span class="ml-3 text-gray-500 text-sm">({{ min_q }}–{{ max_q }})</span>
+  </div>
+
+  <button type="submit"
+          class="w-full py-3 px-6 bg-yellow-400 hover:bg-yellow-300 text-gray-950
+                 font-bold text-lg rounded-xl transition-colors">
+    Start Quiz ✨
+  </button>
+
+</form>
+{% endblock %}
