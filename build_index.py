@@ -3,54 +3,26 @@ build_index.py — One-time script to extract, chunk, embed, and index harrypott
 
 Usage:
     python build_index.py
+    python build_index.py --force
 
 The index is written to ./chroma_db and persists across runs.
 Re-running is safe: the script skips indexing if the collection already exists.
 """
 
 import argparse
-import fitz  # PyMuPDF
-import tiktoken
+
 import chromadb
-from sentence_transformers import SentenceTransformer
+from langchain_chroma import Chroma
+from langchain_community.document_loaders import PyMuPDFLoader
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-PDF_PATH        = "harrypotter.pdf"
-COLLECTION_NAME = "hp_books"
-CHROMA_PATH     = "./chroma_db"
-EMBED_MODEL     = "all-MiniLM-L6-v2"
-CHUNK_SIZE      = 500   # tokens
 CHUNK_OVERLAP   = 50    # tokens
-BATCH_SIZE      = 256
-
-
-def extract_text(pdf_path: str) -> str:
-    doc = fitz.open(pdf_path)
-    text = "\n".join(page.get_text() for page in doc)
-    print(f"  extracted {len(text):,} characters from {len(doc)} pages")
-    return text
-
-
-def chunk_text(text: str, chunk_size: int, overlap: int) -> list[str]:
-    enc = tiktoken.get_encoding("cl100k_base")
-    tokens = enc.encode(text)
-    chunks, start = [], 0
-    while start < len(tokens):
-        end = min(start + chunk_size, len(tokens))
-        chunks.append(enc.decode(tokens[start:end]))
-        start += chunk_size - overlap
-    print(f"  {len(chunks):,} chunks ({chunk_size}-token size, {overlap}-token overlap)")
-    return chunks
-
-
-def build_index(chunks: list[str], collection, embedder: SentenceTransformer) -> None:
-    for i in range(0, len(chunks), BATCH_SIZE):
-        batch = chunks[i : i + BATCH_SIZE]
-        embeddings = embedder.encode(batch, show_progress_bar=False).tolist()
-        ids = [str(i + j) for j in range(len(batch))]
-        collection.add(embeddings=embeddings, documents=batch, ids=ids)
-        done = min(i + BATCH_SIZE, len(chunks))
-        print(f"  indexed {done:,} / {len(chunks):,}", end="\r")
-    print(f"\n  done — {collection.count():,} vectors stored")
+CHUNK_SIZE      = 500   # tokens
+CHROMA_PATH     = "./chroma_db"
+COLLECTION_NAME = "hp_books"
+EMBED_MODEL     = "all-MiniLM-L6-v2"
+PDF_PATH        = "harrypotter.pdf"
 
 
 def main(force: bool = False) -> None:
@@ -66,18 +38,30 @@ def main(force: bool = False) -> None:
     if force and collection.count() > 0:
         print("--force: dropping existing collection...")
         client.delete_collection(COLLECTION_NAME)
-        collection = client.get_or_create_collection(COLLECTION_NAME)
 
-    print("1/3  Extracting PDF...")
-    text = extract_text(PDF_PATH)
+    print("1/3  Loading PDF...")
+    docs = PyMuPDFLoader(PDF_PATH).load()
+    print(f"  loaded {len(docs)} pages")
 
     print("2/3  Chunking...")
-    chunks = chunk_text(text, CHUNK_SIZE, CHUNK_OVERLAP)
+    splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
+        encoding_name="cl100k_base",
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+    )
+    splits = splitter.split_documents(docs)
+    print(f"  {len(splits):,} chunks ({CHUNK_SIZE}-token size, {CHUNK_OVERLAP}-token overlap)")
 
     print("3/3  Embedding & indexing...")
-    embedder = SentenceTransformer(EMBED_MODEL)
-    build_index(chunks, collection, embedder)
-
+    embeddings = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
+    Chroma.from_documents(
+        documents=splits,
+        embedding=embeddings,
+        ids=[str(i) for i in range(len(splits))],
+        collection_name=COLLECTION_NAME,
+        persist_directory=CHROMA_PATH,
+    )
+    print(f"  done — {len(splits):,} vectors stored")
     print("\nIndex ready.")
 
 
