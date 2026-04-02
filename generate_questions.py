@@ -166,6 +166,16 @@ def answer_retrievable(answer: str, embedder, collection, threshold: float) -> b
     return results["distances"][0][0] < threshold
 
 
+def is_tautological(question: str, answer: str) -> bool:
+    """Return True if most answer content words already appear in the question."""
+    table = str.maketrans("", "", string.punctuation)
+    answer_tokens   = set(answer.lower().translate(table).split()) - STOPWORDS
+    question_tokens = set(question.lower().translate(table).split()) - STOPWORDS
+    if not answer_tokens:
+        return False
+    return len(answer_tokens & question_tokens) / len(answer_tokens) >= 0.5
+
+
 def answer_in_chunk(answer: str, chunk: str) -> bool:
     """Return True if at least half of the answer's content words appear in the chunk."""
     table = str.maketrans("", "", string.punctuation)
@@ -260,6 +270,10 @@ def main() -> None:
 
         if contains_direct_quote(question, chunk_text) or contains_direct_quote(answer, chunk_text):
             print(f"  [{attempts}] copyright filter")
+            continue
+
+        if is_tautological(question, answer):
+            print(f"  [{attempts}] tautology filter")
             continue
 
         if not answer_in_chunk(answer, full_context):
