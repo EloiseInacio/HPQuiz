@@ -19,7 +19,7 @@ import chromadb
 from sentence_transformers import SentenceTransformer
 from transformers import pipeline
 
-CHAT_MODEL        = "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+CHAT_MODEL        = "Qwen/Qwen2.5-1.5B-Instruct"
 CHROMA_PATH       = "./chroma_db"
 COLLECTION_NAME   = "hp_books"
 DEFAULT_DB        = "questions.db"
@@ -159,6 +159,13 @@ def estimate_difficulty(question: str, embedder, collection, k: int, threshold: 
 _META_TERMS = frozenset({"context", "passage", "excerpt", "paraphrase", "summarize", "format"})
 
 
+def answer_retrievable(answer: str, embedder, collection, threshold: float) -> bool:
+    """Return True if the answer can be retrieved from the index with distance < threshold."""
+    emb = embedder.encode([answer]).tolist()
+    results = collection.query(query_embeddings=emb, n_results=1, include=["distances"])
+    return results["distances"][0][0] < threshold
+
+
 def answer_in_chunk(answer: str, chunk: str) -> bool:
     """Return True if at least half of the answer's content words appear in the chunk."""
     table = str.maketrans("", "", string.punctuation)
@@ -257,6 +264,10 @@ def main() -> None:
 
         if not answer_in_chunk(answer, full_context):
             print(f"  [{attempts}] grounding filter (answer not in context)")
+            continue
+
+        if not answer_retrievable(answer, embedder, collection, args.threshold):
+            print(f"  [{attempts}] retrieval filter (answer not found in index)")
             continue
 
         difficulty, sim_count = estimate_difficulty(question, embedder, collection, k_diff, args.threshold)

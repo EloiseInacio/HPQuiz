@@ -1,96 +1,86 @@
-# Wizarding World Questionnaire Generator
+# Wizarding World Quiz
 
-A Retrieval-Augmented Generation (RAG) application built on the *Harry Potter* book series to generate questionnaires about the Wizarding World.
+A Harry Potter quiz web app powered by a RAG pipeline over the full book series.
+Questions are generated offline from the source text and served through a playful Flask interface.
 
 ## Overview
 
-This project uses a Retrieval-Augmented Generation pipeline to create lore-grounded questionnaires based on the *Harry Potter* books. Instead of relying only on a language model’s parametric knowledge, the system retrieves relevant passages from the source corpus and uses them to generate questions that are more faithful to the books.
+The project has two phases:
 
-The current repository contains the RAG backend only. The long-term goal is to integrate this backend into a web application where users can generate themed questionnaires on characters, spells, magical creatures, places, events, and broader Wizarding World knowledge.
+1. **Offline** — a RAG pipeline reads the HP books, retrieves relevant passages, and prompts a local LLM to generate grounded quiz questions stored in SQLite.
+2. **Online** — a Flask web app serves the questions as interactive quizzes with difficulty selection, per-question scoring, and an emoji score summary.
 
-## Motivation
+## Stack
 
-Generating high-quality questionnaires on a fictional universe is challenging because factual consistency matters. In the case of the Wizarding World, questions should reflect the content of the books rather than vague or hallucinated model knowledge.
+| Component | Choice |
+|-----------|--------|
+| Embedding model | `all-MiniLM-L6-v2` (384-dim, local) |
+| Vector store | ChromaDB, persistent at `./chroma_db` |
+| LLM (question generation) | `Qwen/Qwen2.5-1.5B-Instruct` (local, ~3 GB) |
+| Question store | SQLite (`questions.db`) |
+| Web framework | Flask + Tailwind CSS |
+| Python env | conda `hpquiz`, Python 3.11 |
 
-A RAG-based approach helps by:
+## Repo layout
 
-- grounding question generation in the original text,
-- improving factual accuracy,
-- enabling topic-specific questionnaire creation,
-- making the generation process more transparent and extensible.
+```
+HPQuiz/
+├── build_index.py          # PDF → ChromaDB (run once)
+├── generate_questions.py   # ChromaDB → questions.db
+├── app.py                  # Flask web app
+├── templates/              # Jinja2 templates (base, index, question, summary)
+├── run.sh                  # Launch the web app
+├── hp_rag.ipynb            # RAG testing notebook
+├── requirements.txt
+└── RAG_DESIGN.md           # Design documentation
+```
 
-## Project Goal
+`harrypotter.pdf` and `chroma_db/` are gitignored — see setup below.
 
-The intended web application will allow users to generate custom questionnaires about the Wizarding World, such as:
+## Setup
 
-- multiple-choice quizzes on Hogwarts houses,
-- short-answer questions about major plot events,
-- character-based trivia sets,
-- thematic questionnaires on magic, creatures, or locations,
-- difficulty-adaptive educational or entertainment quizzes.
+```bash
+conda create -n hpquiz python=3.11
+conda activate hpquiz
+pip install -r requirements.txt
 
-At present, only the retrieval-augmented generation pipeline is implemented in this repository.
+# Build the vector index (requires harrypotter.pdf in the project root)
+python build_index.py
 
-## Current Status
+# Generate questions (downloads ~3 GB model on first run)
+python generate_questions.py --n 100
+```
 
-### Implemented
-- RAG pipeline over the *Harry Potter* books
-- document indexing and retrieval
-- context-grounded question generation
+## Running the app
 
-### Not yet implemented
-- web interface
-- user authentication
-- quiz customization UI
-- answer validation and scoring
-- persistent questionnaire storage
-- deployment-ready frontend/backend integration
+```bash
+./run.sh
+# → http://127.0.0.1:5000
+```
 
-## How It Works
+## Question generation
 
-The pipeline follows a standard RAG workflow:
+`generate_questions.py` samples random chunks from ChromaDB, prompts the LLM with a random question type (factual, character, event, spell/object, location, lore), and applies a multi-layer filter pipeline before saving:
 
-1. **Corpus ingestion**  
-   The *Harry Potter* books are processed and split into chunks.
+| Filter | Purpose |
+|--------|---------|
+| Parse validation | Reject malformed Q/A output |
+| Quality filter | Reject meta-questions and non-questions |
+| Copyright guard | Reject answers containing direct quotes (8-word n-gram check) |
+| Grounding check | Reject answers whose tokens don't appear in the retrieved context |
+| Retrieval check | Reject answers the vector index can't retrieve (likely hallucinated) |
 
-2. **Embedding and indexing**  
-   The chunks are transformed into vector embeddings and stored in a vector database or retrieval index.
+Difficulty is estimated by counting how many of the top-100 ChromaDB hits fall within L2 distance < 1.0 for the question embedding.
 
-3. **User query or generation prompt**  
-   A prompt defines the target questionnaire scope, such as a topic, difficulty, or style.
+## Web app
 
-4. **Retrieval**  
-   Relevant passages are retrieved from the indexed corpus.
-
-5. **Question generation**  
-   A language model uses the retrieved passages as context to generate grounded questionnaire items.
-
-This architecture makes it possible to produce questions that are tied more closely to the source material.
-
-## Example Use Cases
-
-- Generate a beginner-level quiz on Hogwarts professors
-- Create a questionnaire about magical objects and artifacts
-- Build a trivia set focused on *Harry Potter and the Prisoner of Azkaban*
-- Produce lore-grounded study material for fans or readers
-- Support educational exploration of narrative content through question generation
-
-## Suggested Future Architecture
-
-A complete web app version could include:
-
-- **Frontend:** React, Next.js, or another modern web framework
-- **Backend:** Python API with FastAPI or Flask
-- **Vector Store:** FAISS, Chroma, Weaviate, Pinecone, or similar
-- **LLM Layer:** OpenAI API or another compatible language model provider
-- **Storage:** database for generated quizzes and user sessions
+Users pick difficulty (easy / medium / hard / any) and number of questions (1–20). Questions are shown one at a time with a free-text answer field. After each submission the correct answer is revealed with a pass/fail indicator. The summary page shows the final score, an emoji-rated message, and a collapsible per-question breakdown.
 
 ## Limitations
 
-- The current project does not yet expose a user-facing application
-- Output quality depends on corpus preprocessing and retrieval 
+- Answer scoring is keyword-based (token set intersection). Short or proper-noun answers score well; verbose paraphrases may not.
+- Generation quality is bounded by the local 1.5B model. A swap to `gpt-4o-mini` is a two-line change (replace `pipeline` with `openai.OpenAI()`).
 
 ## Disclaimer
 
-This project is a technical and experimental implementation for questionnaire generation based on the *Harry Potter* books. It is not affiliated with, endorsed by, or associated with J.K. Rowling, Warner Bros., or any official Wizarding World entity.
-This project uses the Harry Potter books for retrieval purposes only. It does not provide access to or reproduce copyrighted text.
+This project is a technical experiment. It is not affiliated with J.K. Rowling, Warner Bros., or any Wizarding World entity. The books are used for retrieval only; no copyrighted text is reproduced or served to users.
