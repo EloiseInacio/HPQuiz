@@ -23,7 +23,12 @@
 
 <!-- Question card -->
 <div class="bg-gray-800 rounded-2xl p-6 mb-6 border border-gray-700">
-  <p class="text-xl font-medium leading-relaxed">{{ question.question }}</p>
+  <p class="text-xl font-medium leading-relaxed mb-4">{{ question.question }}</p>
+  {% if question.book %}
+  <p class="text-xs text-gray-500">
+    📚 {{ question.book }}{% if question.chapter %} &mdash; {{ question.chapter }}{% endif %}
+  </p>
+  {% endif %}
 </div>
 
 {% if not show_result %}

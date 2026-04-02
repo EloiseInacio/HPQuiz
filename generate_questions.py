@@ -16,6 +16,7 @@ import sqlite3
 import string
 
 import chromadb
+import fitz
 from sentence_transformers import SentenceTransformer
 from transformers import pipeline
 
@@ -58,6 +59,8 @@ CREATE TABLE IF NOT EXISTS questions (
     source_chunk     TEXT    NOT NULL,
     difficulty       TEXT    NOT NULL,
     similarity_count INTEGER NOT NULL,
+    book             TEXT,
+    chapter          TEXT,
     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 """
@@ -91,6 +94,10 @@ GENERATION_PROMPT_TEMPLATE = (
 def init_db(db_path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.execute(CREATE_TABLE_SQL)
+    existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(questions)")}
+    for col, typedef in [("book", "TEXT"), ("chapter", "TEXT")]:
+        if col not in existing_cols:
+            conn.execute(f"ALTER TABLE questions ADD COLUMN {col} {typedef}")
     conn.commit()
     return conn
 
@@ -101,8 +108,35 @@ def load_models() -> tuple:
     return embedder, gen
 
 
-def get_chunk(collection, chunk_id: int) -> str:
-    return collection.get(ids=[str(chunk_id)])["documents"][0]
+def get_chunk(collection, chunk_id: int) -> tuple:
+    result = collection.get(ids=[str(chunk_id)], include=["documents", "metadatas"])
+    return result["documents"][0], result["metadatas"][0].get("page", 0)
+
+
+def build_chapter_map(pdf_path: str) -> list:
+    """Return list of (toc_page_1indexed, book, chapter) sorted by page."""
+    doc = fitz.open(pdf_path)
+    toc = doc.get_toc()  # [(level, title, page), ...], pages are 1-indexed
+    doc.close()
+    entries = []
+    current_book = ""
+    for level, title, page in toc:
+        if level == 1:
+            current_book = title
+        elif level == 2 and current_book:
+            entries.append((page, current_book, title))
+    return entries
+
+
+def get_chapter_info(fitz_page: int, chapter_map: list) -> tuple:
+    """Return (book, chapter) for a 0-indexed fitz page number."""
+    book, chapter = "Harry Potter", ""
+    for start_page, b, c in chapter_map:
+        if fitz_page + 1 >= start_page:  # fitz is 0-indexed; TOC is 1-indexed
+            book, chapter = b, c
+        else:
+            break
+    return book, chapter
 
 
 def generate_raw(chunk_text: str, question_type: str, gen, embedder, collection, k_context: int = 1) -> tuple:
@@ -158,12 +192,24 @@ def estimate_difficulty(question: str, embedder, collection, k: int, threshold: 
 
 _META_TERMS = frozenset({"context", "passage", "excerpt", "paraphrase", "summarize", "format"})
 
+_VAGUE_REFS = re.compile(
+    r"\b(the|this|that)\s+"
+    r"(change|changes|situation|conversation|discussion|"
+    r"incident|matter|affair|task|event|occurrence|following|above)\b",
+    re.IGNORECASE,
+)
+
 
 def answer_retrievable(answer: str, embedder, collection, threshold: float) -> bool:
     """Return True if the answer can be retrieved from the index with distance < threshold."""
     emb = embedder.encode([answer]).tolist()
     results = collection.query(query_embeddings=emb, n_results=1, include=["distances"])
     return results["distances"][0][0] < threshold
+
+
+def is_vague(question: str) -> bool:
+    """Return True if the question contains a context-dependent reference."""
+    return bool(_VAGUE_REFS.search(question))
 
 
 def is_tautological(question: str, answer: str) -> bool:
@@ -207,12 +253,13 @@ def is_valid_question(question: str) -> bool:
 
 
 def save_question(conn: sqlite3.Connection, question: str, answer: str, source_chunk: str,
-                  difficulty: str, similarity_count: int) -> bool:
+                  difficulty: str, similarity_count: int, book: str, chapter: str) -> bool:
     try:
         conn.execute(
-            "INSERT INTO questions (question, answer, source_chunk, difficulty, similarity_count) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (question, answer, source_chunk, difficulty, similarity_count),
+            "INSERT INTO questions"
+            " (question, answer, source_chunk, difficulty, similarity_count, book, chapter)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (question, answer, source_chunk, difficulty, similarity_count, book, chapter),
         )
         conn.commit()
         return True
@@ -238,6 +285,7 @@ def main() -> None:
         raise SystemExit("Index is empty. Run build_index.py first.")
 
     k_diff = min(args.k_difficulty, total)
+    chapter_map = build_chapter_map(PDF_PATH)
     conn = init_db(args.db)
     embedder, gen = load_models()
 
@@ -249,7 +297,7 @@ def main() -> None:
 
     while saved < args.n and attempts < max_attempts:
         chunk_id = random.randrange(total)
-        chunk_text = get_chunk(collection, chunk_id)
+        chunk_text, chunk_page = get_chunk(collection, chunk_id)
 
         if len(chunk_text.strip()) < 50:
             continue  # boundary artefact, do not count as attempt
@@ -266,6 +314,10 @@ def main() -> None:
         question, answer = parsed
         if not is_valid_question(question):
             print(f"  [{attempts}] quality filter")
+            continue
+
+        if is_vague(question):
+            print(f"  [{attempts}] vague filter")
             continue
 
         if contains_direct_quote(question, chunk_text) or contains_direct_quote(answer, chunk_text):
@@ -286,7 +338,8 @@ def main() -> None:
 
         difficulty, sim_count = estimate_difficulty(question, embedder, collection, k_diff, args.threshold)
 
-        if save_question(conn, question, answer, chunk_text, difficulty, sim_count):
+        book, chapter = get_chapter_info(chunk_page, chapter_map)
+        if save_question(conn, question, answer, chunk_text, difficulty, sim_count, book, chapter):
             saved += 1
             print(f"  [{attempts}] saved {saved}/{args.n} ({difficulty}) — {question[:70]}")
         else:

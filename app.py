@@ -26,16 +26,15 @@ app.secret_key = APP_SECRET_KEY
 def get_questions(difficulty: str, count: int) -> list:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
+    cols = "id, question, answer, difficulty, COALESCE(book,'') AS book, COALESCE(chapter,'') AS chapter"
     if difficulty == "any":
         rows = conn.execute(
-            "SELECT id, question, answer, difficulty FROM questions"
-            " ORDER BY RANDOM() LIMIT ?",
+            f"SELECT {cols} FROM questions ORDER BY RANDOM() LIMIT ?",
             (count,),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT id, question, answer, difficulty FROM questions"
-            " WHERE difficulty = ? ORDER BY RANDOM() LIMIT ?",
+            f"SELECT {cols} FROM questions WHERE difficulty = ? ORDER BY RANDOM() LIMIT ?",
             (difficulty, count),
         ).fetchall()
     conn.close()
