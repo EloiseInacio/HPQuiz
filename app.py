@@ -5,7 +5,7 @@ import string
 from flask import Flask, redirect, render_template, request, session, url_for
 
 APP_SECRET_KEY = os.environ.get("FLASK_SECRET", "hp-quiz-dev-secret-change-me")
-DB_PATH        = os.environ.get("HPQUIZ_DB", "questions.db")
+DB_PATH        = os.environ.get("HPQUIZ_DB", "questions_semantic.db")
 DIFFICULTIES   = ("easy", "medium", "hard", "any")
 MAX_QUESTIONS  = 20
 MIN_QUESTIONS  = 1

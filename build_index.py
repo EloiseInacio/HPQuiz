@@ -4,6 +4,7 @@ build_index.py — One-time script to extract, chunk, embed, and index harrypott
 Usage:
     python build_index.py
     python build_index.py --force
+    python build_index.py --strategy semantic --collection hp_semantic --db ./chroma_semantic
 
 The index is written to ./chroma_db and persists across runs.
 Re-running is safe: the script skips indexing if the collection already exists.
@@ -20,26 +21,25 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 CHUNK_OVERLAP   = 50    # tokens
 CHUNK_SIZE      = 500   # tokens
-CHROMA_PATH     = "./chroma_db"
-COLLECTION_NAME = "hp_books"
+DEFAULT_DB      = "./chroma_db"
+DEFAULT_COLLECTION = "hp_books"
 EMBED_MODEL     = "all-MiniLM-L6-v2"
 PDF_PATH        = "harrypotter.pdf"
 
 
 def main(args) -> None:
-    force = args.force
     print("=== HP Quiz — index builder ===\n")
 
-    client = chromadb.PersistentClient(path=CHROMA_PATH)
-    collection = client.get_or_create_collection(COLLECTION_NAME)
+    client = chromadb.PersistentClient(path=args.db)
+    collection = client.get_or_create_collection(args.collection)
 
-    if collection.count() > 0 and not force:
+    if collection.count() > 0 and not args.force:
         print(f"Index already built ({collection.count():,} vectors). Use --force to rebuild.")
         return
 
-    if force and collection.count() > 0:
+    if args.force and collection.count() > 0:
         print("--force: dropping existing collection...")
-        client.delete_collection(COLLECTION_NAME)
+        client.delete_collection(args.collection)
 
     print("1/3  Loading PDF...")
     docs = PyMuPDFLoader(PDF_PATH).load()
@@ -68,8 +68,8 @@ def main(args) -> None:
         documents=splits,
         embedding=embeddings,
         ids=[str(i) for i in range(len(splits))],
-        collection_name=COLLECTION_NAME,
-        persist_directory=CHROMA_PATH,
+        collection_name=args.collection,
+        persist_directory=args.db,
     )
     print(f"  done — {len(splits):,} vectors stored")
     print("\nIndex ready.")
@@ -80,5 +80,9 @@ if __name__ == "__main__":
     parser.add_argument("--force", action="store_true", help="Drop and rebuild the index")
     parser.add_argument("--strategy", choices=["token", "semantic"], default="token",
                         help="Chunking strategy: token (default) or semantic")
+    parser.add_argument("--collection", default=DEFAULT_COLLECTION,
+                        help="ChromaDB collection name (default: hp_books)")
+    parser.add_argument("--db", default=DEFAULT_DB,
+                        help="ChromaDB persist directory (default: ./chroma_db)")
     args = parser.parse_args()
     main(args)

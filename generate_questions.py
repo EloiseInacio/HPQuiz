@@ -2,8 +2,9 @@
 generate_questions.py — Generate a Harry Potter Q&A question bank via RAG.
 
 Usage:
-    python generate_questions.py [--n 100] [--db questions.db]
+    python generate_questions.py [--n 100] [--output questions.db]
                                  [--threshold 1.0] [--k-difficulty 100]
+                                 [--collection hp_books] [--db ./chroma_db]
 
 Requires the ChromaDB index to be built first:
     python build_index.py
@@ -21,9 +22,9 @@ from sentence_transformers import SentenceTransformer
 from transformers import pipeline
 
 CHAT_MODEL        = "Qwen/Qwen2.5-1.5B-Instruct"
-CHROMA_PATH       = "./chroma_db"
+DEFAULT_CHROMA_DB = "./chroma_db"
+DEFAULT_COLLECTION = "hp_books"
 PDF_PATH          = "harrypotter.pdf"
-COLLECTION_NAME   = "hp_books"
 DEFAULT_DB        = "questions.db"
 DEFAULT_K_DIFF    = 100
 DEFAULT_N         = 100
@@ -271,15 +272,19 @@ def save_question(conn: sqlite3.Connection, question: str, answer: str, source_c
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate HP quiz Q&A pairs via RAG.")
     parser.add_argument("--n", type=int, default=DEFAULT_N, help="Number of questions to generate")
-    parser.add_argument("--db", type=str, default=DEFAULT_DB, help="SQLite output path")
+    parser.add_argument("--output", type=str, default=DEFAULT_DB, help="SQLite output path")
     parser.add_argument("--threshold", type=float, default=DEFAULT_THRESHOLD,
                         help="L2 distance threshold for difficulty estimation")
     parser.add_argument("--k-difficulty", type=int, default=DEFAULT_K_DIFF,
                         help="Number of chunks to query for difficulty estimation")
+    parser.add_argument("--collection", default=DEFAULT_COLLECTION,
+                        help="ChromaDB collection name (default: hp_books)")
+    parser.add_argument("--db", default=DEFAULT_CHROMA_DB,
+                        help="ChromaDB persist directory (default: ./chroma_db)")
     args = parser.parse_args()
 
-    client = chromadb.PersistentClient(path=CHROMA_PATH)
-    collection = client.get_collection(COLLECTION_NAME)
+    client = chromadb.PersistentClient(path=args.db)
+    collection = client.get_collection(args.collection)
 
     total = collection.count()
     if total == 0:
@@ -287,14 +292,14 @@ def main() -> None:
 
     k_diff = min(args.k_difficulty, total)
     chapter_map = build_chapter_map(PDF_PATH)
-    conn = init_db(args.db)
+    conn = init_db(args.output)
     embedder, gen = load_models()
 
     saved = 0
     attempts = 0
     max_attempts = args.n * 3
     print(f"=== HP Quiz — question generator ===")
-    print(f"Target: {args.n} questions | Max attempts: {max_attempts} | DB: {args.db}\n")
+    print(f"Target: {args.n} questions | Max attempts: {max_attempts} | Output: {args.output}\n")
 
     while saved < args.n and attempts < max_attempts:
         chunk_id = random.randrange(total)
@@ -347,7 +352,7 @@ def main() -> None:
             print(f"  [{attempts}] duplicate, skipping")
 
     conn.close()
-    print(f"\nDone. {saved} questions saved to '{args.db}' in {attempts} attempts.")
+    print(f"\nDone. {saved} questions saved to '{args.output}' in {attempts} attempts.")
 
 
 if __name__ == "__main__":
