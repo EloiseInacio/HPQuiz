@@ -23,22 +23,30 @@ app = Flask(__name__)
 app.secret_key = APP_SECRET_KEY
 
 
-def get_questions(difficulty: str, count: int) -> list:
+def get_question_ids(difficulty: str, count: int) -> list:
     conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cols = "id, question, answer, difficulty, COALESCE(book,'') AS book, COALESCE(chapter,'') AS chapter"
     if difficulty == "any":
         rows = conn.execute(
-            f"SELECT {cols} FROM questions ORDER BY RANDOM() LIMIT ?",
-            (count,),
+            "SELECT id FROM questions ORDER BY RANDOM() LIMIT ?", (count,)
         ).fetchall()
     else:
         rows = conn.execute(
-            f"SELECT {cols} FROM questions WHERE difficulty = ? ORDER BY RANDOM() LIMIT ?",
+            "SELECT id FROM questions WHERE difficulty = ? ORDER BY RANDOM() LIMIT ?",
             (difficulty, count),
         ).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [r[0] for r in rows]
+
+
+def get_question_by_id(qid: int, include_answer: bool = False) -> dict | None:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cols = "id, question, difficulty, COALESCE(book,'') AS book, COALESCE(chapter,'') AS chapter"
+    if include_answer:
+        cols += ", answer"
+    row = conn.execute(f"SELECT {cols} FROM questions WHERE id = ?", (qid,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 def score_answer(user_answer: str, correct_answer: str) -> bool:
@@ -66,7 +74,7 @@ def get_score_message(pct: int) -> str:
 
 @app.route("/")
 def index():
-    for key in ("quiz_questions", "quiz_index", "quiz_results", "quiz_total"):
+    for key in ("quiz_question_ids", "quiz_index", "quiz_results", "quiz_total"):
         session.pop(key, None)
     flash_message = session.pop("flash_message", None)
     return render_template("index.html", difficulties=DIFFICULTIES,
@@ -86,26 +94,28 @@ def start():
     if difficulty not in DIFFICULTIES:
         difficulty = "any"
 
-    questions = get_questions(difficulty, count)
-    if not questions:
+    question_ids = get_question_ids(difficulty, count)
+    if not question_ids:
         session["flash_message"] = "No questions found for that difficulty! 😢 Try a different one or run generate_questions.py first."
         return redirect(url_for("index"))
 
-    session["quiz_questions"] = questions
-    session["quiz_index"]     = 0
-    session["quiz_total"]     = len(questions)
-    session["quiz_results"]   = []
+    session["quiz_question_ids"] = question_ids
+    session["quiz_index"]        = 0
+    session["quiz_total"]        = len(question_ids)
+    session["quiz_results"]      = []
     return redirect(url_for("question"))
 
 
 @app.route("/question")
 def question():
-    if "quiz_questions" not in session:
+    if "quiz_question_ids" not in session:
         return redirect(url_for("index"))
     if session["quiz_index"] >= session["quiz_total"]:
         return redirect(url_for("summary"))
     idx = session["quiz_index"]
-    q   = session["quiz_questions"][idx]
+    q   = get_question_by_id(session["quiz_question_ids"][idx])
+    if q is None:
+        return redirect(url_for("index"))
     return render_template("question.html", question=q,
                            index=idx + 1, total=session["quiz_total"],
                            show_result=False)
@@ -113,16 +123,19 @@ def question():
 
 @app.route("/submit", methods=["POST"])
 def submit():
-    if "quiz_questions" not in session:
+    if "quiz_question_ids" not in session:
         return redirect(url_for("index"))
     idx = session["quiz_index"]
     if idx >= session["quiz_total"]:
         return redirect(url_for("summary"))
 
+    q = get_question_by_id(session["quiz_question_ids"][idx], include_answer=True)
+    if q is None:
+        return redirect(url_for("index"))
+
     # guard against double-submission on browser Back
     if len(session["quiz_results"]) > idx:
         result = session["quiz_results"][idx]
-        q = session["quiz_questions"][idx]
         return render_template("question.html", question=q,
                                index=idx + 1, total=session["quiz_total"],
                                show_result=True,
@@ -130,7 +143,6 @@ def submit():
                                is_correct=result["is_correct"],
                                correct_answer=result["correct_answer"])
 
-    q           = session["quiz_questions"][idx]
     user_answer = request.form.get("user_answer", "").strip()
     is_correct  = score_answer(user_answer, q["answer"])
 
@@ -153,7 +165,7 @@ def submit():
 
 @app.route("/next", methods=["POST"])
 def next_question():
-    if "quiz_questions" not in session:
+    if "quiz_question_ids" not in session:
         return redirect(url_for("index"))
     session["quiz_index"] += 1
     session.modified = True
@@ -171,7 +183,7 @@ def summary():
     total         = len(results)
     pct           = round(correct_count / total * 100)
     message       = get_score_message(pct)
-    for key in ("quiz_questions", "quiz_index", "quiz_results", "quiz_total"):
+    for key in ("quiz_question_ids", "quiz_index", "quiz_results", "quiz_total"):
         session.pop(key, None)
     return render_template("summary.html", results=results,
                            correct_count=correct_count, total=total,
