@@ -22,6 +22,7 @@ from transformers import pipeline
 
 CHAT_MODEL        = "Qwen/Qwen2.5-1.5B-Instruct"
 CHROMA_PATH       = "./chroma_db"
+PDF_PATH          = "harrypotter.pdf"
 COLLECTION_NAME   = "hp_books"
 DEFAULT_DB        = "questions.db"
 DEFAULT_K_DIFF    = 100
