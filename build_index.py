@@ -14,6 +14,7 @@ import argparse
 import chromadb
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import PyMuPDFLoader
+from langchain_experimental.text_splitter import SemanticChunker
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -25,7 +26,8 @@ EMBED_MODEL     = "all-MiniLM-L6-v2"
 PDF_PATH        = "harrypotter.pdf"
 
 
-def main(force: bool = False) -> None:
+def main(args) -> None:
+    force = args.force
     print("=== HP Quiz — index builder ===\n")
 
     client = chromadb.PersistentClient(path=CHROMA_PATH)
@@ -43,17 +45,25 @@ def main(force: bool = False) -> None:
     docs = PyMuPDFLoader(PDF_PATH).load()
     print(f"  loaded {len(docs)} pages")
 
+    embeddings = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
+
     print("2/3  Chunking...")
-    splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-        encoding_name="cl100k_base",
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-    )
-    splits = splitter.split_documents(docs)
-    print(f"  {len(splits):,} chunks ({CHUNK_SIZE}-token size, {CHUNK_OVERLAP}-token overlap)")
+    if args.strategy == "semantic":
+        splitter = SemanticChunker(embeddings,
+                                   breakpoint_threshold_type="percentile",
+                                   breakpoint_threshold_amount=95)
+        splits = splitter.split_documents(docs)
+        print(f"  {len(splits):,} chunks (semantic, 95th-percentile breakpoints)")
+    else:
+        splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
+            encoding_name="cl100k_base",
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=CHUNK_OVERLAP,
+        )
+        splits = splitter.split_documents(docs)
+        print(f"  {len(splits):,} chunks ({CHUNK_SIZE}-token size, {CHUNK_OVERLAP}-token overlap)")
 
     print("3/3  Embedding & indexing...")
-    embeddings = HuggingFaceEmbeddings(model_name=EMBED_MODEL)
     Chroma.from_documents(
         documents=splits,
         embedding=embeddings,
@@ -68,5 +78,7 @@ def main(force: bool = False) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Build the HP Quiz ChromaDB index.")
     parser.add_argument("--force", action="store_true", help="Drop and rebuild the index")
+    parser.add_argument("--strategy", choices=["token", "semantic"], default="token",
+                        help="Chunking strategy: token (default) or semantic")
     args = parser.parse_args()
-    main(force=args.force)
+    main(args)
