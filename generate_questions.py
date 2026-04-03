@@ -81,7 +81,7 @@ SYSTEM_PROMPT = (
 )
 
 GENERATION_PROMPT_TEMPLATE = (
-    "Passage:\n{context}\n\n"
+    "<passage>\n{context}\n</passage>\n\n"
     "Using only the passage above, write exactly one {question_type} quiz question. "
     "The answer must be a word, name, or short phrase taken directly from the passage. "
     "Do not invent any facts. "
