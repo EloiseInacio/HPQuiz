@@ -11,8 +11,8 @@ parameter affects the output.
 The pipeline runs a loop until `--n` questions are saved or the attempt budget is exhausted.
 Each iteration:
 
-1. Sample a random chunk from ChromaDB
-2. Retrieve related chunks and build a context window
+1. Sample a random seed chunk, embed a short prefix, retrieve k related chunks
+2. Assemble the context window from the anchor and related chunks
 3. Prompt the LLM to generate a Q/A pair
 4. Parse the raw output into `(question, answer)`
 5. Run the filter pipeline — discard on any failure
@@ -21,10 +21,13 @@ Each iteration:
 8. Save to SQLite
 
 ```
-random chunk
+random seed chunk
+     │
+     ▼ embed 30-word prefix
+ RAG retrieval  ──► anchor + k-1 related chunks
      │
      ▼
- RAG retrieval  ──► context (seed + k related chunks)
+context assembly
      │
      ▼
    LLM prompt
@@ -59,45 +62,50 @@ random chunk
 
 ---
 
-## Step 1 — Chunk sampling
+## Step 1 — Semantic cluster sampling
 
 ```python
-chunk_id = random.randrange(total)
-chunk_text, chunk_page = get_chunk(collection, chunk_id)
+seed_id   = random.randrange(total)
+seed_text, _ = get_chunk(collection, seed_id)
+seed      = " ".join(seed_text.split()[:SEED_WORDS])   # first 30 words
+seed_emb  = embedder.encode([seed]).tolist()
+results   = collection.query(query_embeddings=seed_emb, n_results=k, ...)
+anchor_text, anchor_page = docs[0], metas[0].get("page", 0)
+related   = docs[1:]
 ```
 
-A chunk is drawn uniformly at random from the 4,425 chunks stored in ChromaDB.
-Each chunk covers approximately 500 tokens (≈ 400 words) with 50-token overlap between
-adjacent chunks. The chunk page number (0-indexed, from LangChain's PyMuPDFLoader metadata)
-is also retrieved for later book/chapter lookup.
+Rather than using a random chunk directly as the generation anchor, the pipeline picks a
+random chunk as a **topic seed**, extracts its first 30 words as a short query, and retrieves
+the `k` nearest neighbours from ChromaDB. The closest retrieved chunk becomes the **anchor**
+(used for generation and book/chapter lookup); the remaining `k-1` chunks are the **related**
+set. Together they form a semantically coherent topic cluster.
 
-Chunks shorter than 50 characters are skipped without counting as an attempt — they are
+`k` is controlled by `--k-context` (default 5). Anchor and related chunks are all from the
+same semantic neighbourhood, so validity checks operate on topically consistent context.
+
+Anchors shorter than 50 characters are skipped without counting as an attempt — they are
 boundary artefacts near page transitions.
 
 ---
 
-## Step 2 — RAG retrieval and context assembly
+## Step 2 — Context assembly
 
 ```python
-q_emb = embedder.encode([chunk_text]).tolist()
-results = collection.query(query_embeddings=q_emb, n_results=k_context, include=["documents"])
-context = chunk_text + "\n\n---\n\n" + "\n\n---\n\n".join(related)
+full_context = anchor_text + "\n\n---\n\n" + "\n\n---\n\n".join(related)
 ```
 
-The seed chunk is embedded with `all-MiniLM-L6-v2` (384-dim, L2 distance) and used to
-retrieve the `k_context` most similar chunks from the index. The seed chunk is prepended to
-the retrieved chunks to form the full context passed to the LLM.
+The anchor chunk is prepended to the `k-1` related chunks, separated by `---` delimiters.
+At `k=5`, the context is approximately 2,000–3,000 tokens — within Qwen2.5-1.5B's 32k
+context window.
 
-`k_context` defaults to 1. Raising it increases context diversity but also increases the
-token budget. At `k_context=1`, the context is approximately 1,000 tokens — well within
-Qwen2.5-1.5B's 32k context window.
-
-The full context (seed + related) is kept as `full_context` and reused downstream by the
-grounding filter.
+`full_context` is passed to the LLM and reused downstream by the grounding filter.
 
 ---
 
 ## Step 3 — LLM generation
+
+`generate_raw(full_context, question_type, gen)` takes the pre-assembled context and returns
+a raw string. Retrieval is the caller's responsibility; this function is purely generative.
 
 The model is `Qwen/Qwen2.5-1.5B-Instruct`, loaded via the HuggingFace `transformers`
 pipeline with `dtype="auto"` and `device_map="auto"`.
@@ -293,12 +301,15 @@ The `UNIQUE` constraint on `question` silently discards duplicates across runs.
 
 ## Parameters
 
-| argument        | default | effect                                                      |
-|-----------------|---------|-------------------------------------------------------------|
-| `--n`           | 100     | target number of questions to save                          |
-| `--db`          | `questions.db` | SQLite output path                                 |
-| `--threshold`   | 1.0     | L2 threshold for grounding/retrieval/difficulty checks      |
-| `--k-difficulty`| 100     | number of chunks queried for difficulty estimation          |
+| argument        | default         | effect                                                      |
+|-----------------|-----------------|-------------------------------------------------------------|
+| `--n`           | 100             | target number of questions to save                          |
+| `--output`      | `questions.db`  | SQLite output path                                          |
+| `--threshold`   | 1.0             | L2 threshold for grounding/retrieval/difficulty checks      |
+| `--k-difficulty`| 100             | number of chunks queried for difficulty estimation          |
+| `--k-context`   | 5               | cluster size: anchor + related chunks for generation        |
+| `--collection`  | `hp_books`      | ChromaDB collection name                                    |
+| `--db`          | `./chroma_db`   | ChromaDB persist directory                                  |
 
 The attempt budget is `n * 3`. If the budget is exhausted before `n` questions are saved,
 the script exits with however many were collected. Increase `--n` or lower `--threshold`
@@ -308,8 +319,11 @@ to raise yield.
 
 ## Yield and failure modes
 
-Typical yield with `Qwen2.5-1.5B-Instruct` is 25–35% of attempts. The dominant rejection
-reasons in order of frequency:
+Typical yield with `Qwen2.5-1.5B-Instruct` and `--k-context 5` is ~35% of attempts.
+The larger context window (5 chunks vs. the previous default of 1) raises the grounding bar,
+which slightly reduces yield compared to smaller contexts but improves question quality.
+
+The dominant rejection reasons in order of frequency:
 
 1. **Retrieval filter** (~40% of rejects) — answer not found in the corpus; the model
    draws on parametric knowledge rather than the passage.

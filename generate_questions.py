@@ -5,6 +5,7 @@ Usage:
     python generate_questions.py [--n 100] [--output questions.db]
                                  [--threshold 1.0] [--k-difficulty 100]
                                  [--collection hp_books] [--db ./chroma_db]
+                                 [--k-context 5]
 
 Requires the ChromaDB index to be built first:
     python build_index.py
@@ -31,6 +32,7 @@ DEFAULT_N         = 100
 DEFAULT_THRESHOLD = 1.0  # L2 distance threshold; ~cosine_sim 0.5 for normalised vectors
 EMBED_MODEL       = "all-MiniLM-L6-v2"
 MAX_ANSWER_WORDS  = 20
+SEED_WORDS        = 30   # words extracted from seed chunk to form the RAG query
 MIN_QUOTE_WORDS   = 8   # sequences of this many consecutive words trigger the copyright guardrail
 
 DIFFICULTY_THRESHOLDS = {"easy": 15, "medium": 5}
@@ -141,16 +143,34 @@ def get_chapter_info(fitz_page: int, chapter_map: list) -> tuple:
     return book, chapter
 
 
-def generate_raw(chunk_text: str, question_type: str, gen, embedder, collection, k_context: int = 1) -> tuple:
-    q_emb = embedder.encode([chunk_text]).tolist()
-    results = collection.query(query_embeddings=q_emb, n_results=k_context, include=["documents"])
-    related = results["documents"][0]
-    context = chunk_text + "\n\n---\n\n" + "\n\n---\n\n".join(related)
+def sample_related_chunks(collection, embedder, total: int, k: int) -> tuple:
+    """Pick a random seed chunk, embed a short prefix, retrieve k nearest neighbours.
 
+    Returns (anchor_text, anchor_page, related_texts) where anchor is the closest
+    retrieved chunk and related_texts are the remaining k-1 chunks.
+    """
+    seed_id = random.randrange(total)
+    seed_text, _ = get_chunk(collection, seed_id)
+    seed = " ".join(seed_text.split()[:SEED_WORDS])
+    seed_emb = embedder.encode([seed]).tolist()
+    results = collection.query(
+        query_embeddings=seed_emb,
+        n_results=k,
+        include=["documents", "metadatas"],
+    )
+    docs        = results["documents"][0]
+    metas       = results["metadatas"][0]
+    anchor_text = docs[0]
+    anchor_page = metas[0].get("page", 0)
+    related     = docs[1:]
+    return anchor_text, anchor_page, related
+
+
+def generate_raw(full_context: str, question_type: str, gen) -> str:
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": GENERATION_PROMPT_TEMPLATE.format(
-            context=context,
+            context=full_context,
             question_type=question_type,
         )},
     ]
@@ -158,7 +178,7 @@ def generate_raw(chunk_text: str, question_type: str, gen, embedder, collection,
     # Prime generation with "Q:" so the model is constrained to start with the question.
     # return_full_text=False returns only the generated tokens; we prepend the primer back.
     out = gen(prompt + "Q:", max_new_tokens=192, return_full_text=False)
-    return "Q:" + out[0]["generated_text"].strip(), context
+    return "Q:" + out[0]["generated_text"].strip()
 
 
 def parse_qa(raw: str) -> tuple | None:
@@ -281,6 +301,8 @@ def main() -> None:
                         help="ChromaDB collection name (default: hp_books)")
     parser.add_argument("--db", default=DEFAULT_CHROMA_DB,
                         help="ChromaDB persist directory (default: ./chroma_db)")
+    parser.add_argument("--k-context", type=int, default=5,
+                        help="Related chunks to retrieve per seed (default: 5)")
     args = parser.parse_args()
 
     client = chromadb.PersistentClient(path=args.db)
@@ -302,15 +324,17 @@ def main() -> None:
     print(f"Target: {args.n} questions | Max attempts: {max_attempts} | Output: {args.output}\n")
 
     while saved < args.n and attempts < max_attempts:
-        chunk_id = random.randrange(total)
-        chunk_text, chunk_page = get_chunk(collection, chunk_id)
+        anchor_text, anchor_page, related = sample_related_chunks(
+            collection, embedder, total, args.k_context
+        )
 
-        if len(chunk_text.strip()) < 50:
+        if len(anchor_text.strip()) < 50:
             continue  # boundary artefact, do not count as attempt
 
-        attempts += 1
+        full_context  = anchor_text + "\n\n---\n\n" + "\n\n---\n\n".join(related)
+        attempts     += 1
         question_type = random.choice(QUESTION_TYPES)
-        raw, full_context = generate_raw(chunk_text, question_type, gen, embedder, collection)
+        raw           = generate_raw(full_context, question_type, gen)
         parsed = parse_qa(raw)
 
         if parsed is None:
@@ -326,7 +350,7 @@ def main() -> None:
             print(f"  [{attempts}] vague filter")
             continue
 
-        if contains_direct_quote(question, chunk_text) or contains_direct_quote(answer, chunk_text):
+        if contains_direct_quote(question, anchor_text) or contains_direct_quote(answer, anchor_text):
             print(f"  [{attempts}] copyright filter")
             continue
 
@@ -344,8 +368,8 @@ def main() -> None:
 
         difficulty, sim_count = estimate_difficulty(question, embedder, collection, k_diff, args.threshold)
 
-        book, chapter = get_chapter_info(chunk_page, chapter_map)
-        if save_question(conn, question, answer, chunk_text, difficulty, sim_count, book, chapter):
+        book, chapter = get_chapter_info(anchor_page, chapter_map)
+        if save_question(conn, question, answer, anchor_text, difficulty, sim_count, book, chapter):
             saved += 1
             print(f"  [{attempts}] saved {saved}/{args.n} ({difficulty}) — {question[:70]}")
         else:

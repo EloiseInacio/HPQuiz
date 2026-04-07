@@ -15,7 +15,7 @@ The project has two phases:
 | Component | Choice |
 |-----------|--------|
 | Embedding model | `all-MiniLM-L6-v2` (384-dim, local) |
-| Vector store | ChromaDB, persistent at `./chroma_db` |
+| Vector store | ChromaDB, persistent at `./chroma_db` (configurable via `--db`) |
 | LLM (question generation) | `Qwen/Qwen2.5-1.5B-Instruct` (local, ~3 GB) |
 | Question store | SQLite (`questions.db`) |
 | Web framework | Flask + Tailwind CSS |
@@ -45,10 +45,13 @@ conda activate hpquiz
 pip install -r requirements.txt
 
 # Build the vector index (requires harrypotter.pdf in the project root)
-python build_index.py
+# --strategy token (default) or semantic
+# --collection names the ChromaDB collection (default: hp_books)
+python build_index.py --strategy token
 
 # Generate questions (downloads ~3 GB model on first run)
-python generate_questions.py --n 100
+# --collection and --db must match the index built above
+python generate_questions.py --n 100 --collection hp_books
 ```
 
 ## Running the app
@@ -60,13 +63,22 @@ python generate_questions.py --n 100
 
 ## Question generation
 
-`generate_questions.py` samples random chunks from ChromaDB, prompts the LLM with a random question type (factual, character, event, spell/object, location, lore), and applies a multi-layer filter pipeline before saving:
+`generate_questions.py` uses semantic cluster sampling: a random chunk is used as a topic
+seed, its first 30 words are embedded, and the `--k-context` (default 5) nearest chunks are
+retrieved from ChromaDB. The closest chunk becomes the generation anchor; all k chunks form
+the context window. This ensures the LLM and the validity filters operate on a topically
+coherent passage rather than an isolated random chunk.
+
+The LLM is prompted with a random question type (factual, character, event, spell/object,
+location, lore) and the output passes a multi-layer filter pipeline before saving:
 
 | Filter | Purpose |
 |--------|---------|
 | Parse validation | Reject malformed Q/A output |
 | Quality filter | Reject meta-questions and non-questions |
-| Copyright guard | Reject answers containing direct quotes (8-word n-gram check) |
+| Vague filter | Reject questions that require the source passage to be answerable |
+| Copyright guard | Reject output reproducing 8+ consecutive words from the source |
+| Tautology filter | Reject answers whose content words appear in the question |
 | Grounding check | Reject answers whose tokens don't appear in the retrieved context |
 | Retrieval check | Reject answers the vector index can't retrieve (likely hallucinated) |
 
