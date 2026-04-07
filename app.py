@@ -14,7 +14,9 @@ GENERATION_LOG  = "generation.log"
 DIFFICULTIES    = ("easy", "medium", "hard", "any")
 MAX_QUESTIONS   = 20
 MIN_QUESTIONS   = 1
-ADMIN_PAGE_SIZE = 20
+ADMIN_PAGE_SIZE  = 20
+DIFFICULTY_STEP  = 2   # similarity_count delta per answer
+DIFFICULTY_THRESHOLDS = {"easy": 15, "medium": 5}   # mirrors generate_questions.py
 
 _generation_proc = None
 
@@ -87,6 +89,27 @@ def get_question_by_id(qid: int, include_answer: bool = False) -> dict | None:
     row = conn.execute(f"SELECT {cols} FROM questions WHERE id = ?", (qid,)).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def update_question_difficulty(qid: int, is_correct: bool) -> None:
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT similarity_count FROM questions WHERE id = ?", (qid,)).fetchone()
+    if row is None:
+        conn.close()
+        return
+    score = max(0, min(100, row[0] + (DIFFICULTY_STEP if is_correct else -DIFFICULTY_STEP)))
+    if score > DIFFICULTY_THRESHOLDS["easy"]:
+        difficulty = "easy"
+    elif score >= DIFFICULTY_THRESHOLDS["medium"]:
+        difficulty = "medium"
+    else:
+        difficulty = "hard"
+    conn.execute(
+        "UPDATE questions SET similarity_count = ?, difficulty = ? WHERE id = ?",
+        (score, difficulty, qid),
+    )
+    conn.commit()
+    conn.close()
 
 
 def score_answer(user_answer: str, correct_answer: str) -> bool:
@@ -185,6 +208,7 @@ def submit():
 
     user_answer = request.form.get("user_answer", "").strip()
     is_correct  = score_answer(user_answer, q["answer"])
+    update_question_difficulty(q["id"], is_correct)
 
     session["quiz_results"].append({
         "question":       q["question"],
