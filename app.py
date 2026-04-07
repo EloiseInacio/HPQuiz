@@ -312,7 +312,7 @@ def admin_questions():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT id, question, difficulty, COALESCE(book,'') AS book FROM questions"
+        "SELECT id, question, answer, difficulty, COALESCE(book,'') AS book FROM questions"
         " ORDER BY id DESC LIMIT ? OFFSET ?",
         (ADMIN_PAGE_SIZE, offset),
     ).fetchall()
