@@ -8,10 +8,22 @@
 </head>
 <body class="bg-gray-950 text-gray-100 min-h-screen font-sans">
 
-  <header class="border-b border-yellow-400/20 py-4 px-6 mb-8">
+  <header class="border-b border-yellow-400/20 py-4 px-6 mb-8 flex items-center justify-between">
     <a href="/" class="text-2xl font-bold text-yellow-400 hover:text-yellow-300 transition-colors">
       ⚡ HP Quiz
     </a>
+    <div class="flex items-center gap-4 text-sm">
+      {% if session.get("role") == "admin" %}
+        <a href="/admin" class="text-yellow-400 hover:text-yellow-300 font-semibold">⚙ Admin</a>
+        <span class="text-gray-500">{{ session.get("username") }}</span>
+        <a href="/logout" class="text-gray-400 hover:text-gray-200">Logout</a>
+      {% elif session.get("username") %}
+        <span class="text-gray-500">{{ session.get("username") }}</span>
+        <a href="/logout" class="text-gray-400 hover:text-gray-200">Logout</a>
+      {% else %}
+        <a href="/login" class="text-gray-400 hover:text-gray-200">Login</a>
+      {% endif %}
+    </div>
   </header>
 
   <main class="max-w-2xl mx-auto px-4 pb-16">

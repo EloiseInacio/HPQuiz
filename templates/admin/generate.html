@@ -1,0 +1,80 @@
+{% extends "admin/base.html" %}
+{% block title %}⚙ Admin — Generate{% endblock %}
+
+{% block content %}
+<h1 class="text-2xl font-bold text-yellow-400 mb-8">Generate Questions</h1>
+
+<!-- Launch form -->
+<div class="bg-gray-800 rounded-2xl p-6 border border-gray-700 max-w-md mb-8">
+  {% if running %}
+  <div class="mb-4 px-4 py-3 bg-yellow-400/10 border border-yellow-400/40 rounded-xl text-yellow-300 text-sm">
+    Generation is running…
+  </div>
+  {% endif %}
+  <form method="POST" action="/admin/generate/run" class="space-y-4">
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="block text-xs text-gray-500 uppercase tracking-widest mb-1">Questions (--n)</label>
+        <input type="number" name="n" value="50" min="1" max="500"
+               class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-gray-100
+                      focus:outline-none focus:border-yellow-400 transition-colors text-sm">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 uppercase tracking-widest mb-1">Collection</label>
+        <input type="text" name="collection" value="{{ default_collection }}"
+               class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-gray-100
+                      focus:outline-none focus:border-yellow-400 transition-colors text-sm">
+      </div>
+    </div>
+    <div>
+      <label class="block text-xs text-gray-500 uppercase tracking-widest mb-1">Output DB (--output)</label>
+      <input type="text" name="output" value="{{ default_output }}"
+             class="w-full bg-gray-900 border border-gray-600 rounded-lg px-3 py-2 text-gray-100
+                    focus:outline-none focus:border-yellow-400 transition-colors text-sm">
+    </div>
+    <button type="submit" {% if running %}disabled{% endif %}
+            class="px-5 py-2 bg-yellow-400 hover:bg-yellow-300 disabled:opacity-40 disabled:cursor-not-allowed
+                   text-gray-950 font-semibold text-sm rounded-lg transition-colors">
+      {% if running %}Running…{% else %}Start generation ⚡{% endif %}
+    </button>
+  </form>
+</div>
+
+<!-- Log output -->
+<div class="bg-gray-900 rounded-xl border border-gray-700 p-4">
+  <div class="flex items-center justify-between mb-3">
+    <p class="text-xs text-gray-500 uppercase tracking-widest">Output log</p>
+    <span id="status-badge"
+          class="text-xs px-2 py-0.5 rounded-full
+                 {% if running %}bg-yellow-400/20 text-yellow-300{% else %}bg-gray-700 text-gray-400{% endif %}">
+      {% if running %}running{% else %}idle{% endif %}
+    </span>
+  </div>
+  <pre id="log-output"
+       class="text-xs text-gray-300 whitespace-pre-wrap break-words max-h-96 overflow-y-auto font-mono leading-relaxed">{{ log or "No output yet." }}</pre>
+</div>
+
+<script>
+  (function () {
+    const logEl    = document.getElementById("log-output");
+    const badgeEl  = document.getElementById("status-badge");
+    let running    = {{ "true" if running else "false" }};
+
+    function poll() {
+      fetch("/admin/generate/status")
+        .then(r => r.json())
+        .then(data => {
+          logEl.textContent = data.log || "No output yet.";
+          logEl.scrollTop   = logEl.scrollHeight;
+          const isRunning   = data.running;
+          badgeEl.textContent = isRunning ? "running" : "idle";
+          badgeEl.className   = "text-xs px-2 py-0.5 rounded-full " +
+            (isRunning ? "bg-yellow-400/20 text-yellow-300" : "bg-gray-700 text-gray-400");
+          if (isRunning) setTimeout(poll, 5000);
+        });
+    }
+
+    if (running) setTimeout(poll, 5000);
+  })();
+</script>
+{% endblock %}
