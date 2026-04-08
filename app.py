@@ -195,7 +195,11 @@ def score_answer(user_answer: str, correct_answer: str) -> bool:
     correct_tokens = set(correct_norm.split()) - STOPWORDS
     if not correct_tokens or not user_tokens:
         return correct_norm in user_norm
-    return len(user_tokens & correct_tokens) >= max(1, len(correct_tokens) // 2)
+    overlap = len(user_tokens & correct_tokens)
+    # Accept if the overlap covers half the correct answer (recall)
+    # OR half the user's answer (precision) — handles concise paraphrases.
+    return (overlap >= max(1, len(correct_tokens) // 2) or
+            overlap >= max(1, len(user_tokens) // 2))
 
 
 def get_score_message(pct: int) -> str:
