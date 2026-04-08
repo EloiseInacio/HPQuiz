@@ -1,4 +1,5 @@
 import os
+import re
 import sqlite3
 import string
 import subprocess
@@ -157,12 +158,43 @@ def update_question_difficulty(qid: int, is_correct: bool) -> None:
     conn.close()
 
 
+_NUM_ONES = [
+    "zero","one","two","three","four","five","six","seven","eight","nine",
+    "ten","eleven","twelve","thirteen","fourteen","fifteen","sixteen",
+    "seventeen","eighteen","nineteen",
+]
+_NUM_TENS = ["","","twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety"]
+
+
+def _int_to_words(n: int) -> str:
+    if n < 20:
+        return _NUM_ONES[n]
+    if n < 100:
+        rest = (" " + _NUM_ONES[n % 10]) if n % 10 else ""
+        return _NUM_TENS[n // 10] + rest
+    if n < 1000:
+        rest = (" " + _int_to_words(n % 100)) if n % 100 else ""
+        return _NUM_ONES[n // 100] + " hundred" + rest
+    return str(n)
+
+
+def _normalize_numbers(text: str) -> str:
+    """Replace digit sequences with their word equivalents (0-999)."""
+    return re.sub(
+        r"\b(\d+)\b",
+        lambda m: _int_to_words(int(m.group())) if int(m.group()) < 1000 else m.group(),
+        text,
+    )
+
+
 def score_answer(user_answer: str, correct_answer: str) -> bool:
     table = str.maketrans("", "", string.punctuation)
-    user_tokens    = set(user_answer.lower().translate(table).split()) - STOPWORDS
-    correct_tokens = set(correct_answer.lower().translate(table).split()) - STOPWORDS
+    user_norm    = _normalize_numbers(user_answer.lower()).translate(table)
+    correct_norm = _normalize_numbers(correct_answer.lower()).translate(table)
+    user_tokens    = set(user_norm.split()) - STOPWORDS
+    correct_tokens = set(correct_norm.split()) - STOPWORDS
     if not correct_tokens or not user_tokens:
-        return correct_answer.lower() in user_answer.lower()
+        return correct_norm in user_norm
     return len(user_tokens & correct_tokens) >= max(1, len(correct_tokens) // 2)
 
 
