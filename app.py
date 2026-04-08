@@ -189,8 +189,8 @@ def _normalize_numbers(text: str) -> str:
 
 def score_answer(user_answer: str, correct_answer: str) -> bool:
     table = str.maketrans("", "", string.punctuation)
-    user_norm    = _normalize_numbers(user_answer.lower()).translate(table)
-    correct_norm = _normalize_numbers(correct_answer.lower()).translate(table)
+    user_norm    = _normalize_numbers(user_answer.lower().translate(table))
+    correct_norm = _normalize_numbers(correct_answer.lower().translate(table))
     user_tokens    = set(user_norm.split()) - STOPWORDS
     correct_tokens = set(correct_norm.split()) - STOPWORDS
     if not correct_tokens or not user_tokens:
