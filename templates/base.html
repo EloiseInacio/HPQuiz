@@ -15,9 +15,11 @@
     <div class="flex items-center gap-4 text-sm">
       {% if session.get("role") == "admin" %}
         <a href="/admin" class="text-yellow-400 hover:text-yellow-300 font-semibold">⚙ Admin</a>
+        <a href="/stats" class="text-gray-400 hover:text-gray-200">My Stats</a>
         <span class="text-gray-500">{{ session.get("username") }}</span>
         <a href="/logout" class="text-gray-400 hover:text-gray-200">Logout</a>
       {% elif session.get("username") %}
+        <a href="/stats" class="text-gray-400 hover:text-gray-200">My Stats</a>
         <span class="text-gray-500">{{ session.get("username") }}</span>
         <a href="/logout" class="text-gray-400 hover:text-gray-200">Logout</a>
       {% else %}

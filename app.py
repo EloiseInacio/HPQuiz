@@ -2,6 +2,7 @@ import os
 import sqlite3
 import string
 import subprocess
+import time
 from functools import wraps
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
@@ -45,8 +46,52 @@ def get_users_db():
             created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS quiz_results (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            score_pct  INTEGER NOT NULL,
+            correct    INTEGER NOT NULL,
+            total      INTEGER NOT NULL,
+            duration_s INTEGER NOT NULL,
+            difficulty TEXT    NOT NULL,
+            played_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_quiz_results_user ON quiz_results(user_id)"
+    )
     conn.commit()
     return conn
+
+
+def save_quiz_result(user_id: int, score_pct: int, correct: int, total: int,
+                     duration_s: int, difficulty: str) -> None:
+    conn = get_users_db()
+    conn.execute(
+        "INSERT INTO quiz_results (user_id, score_pct, correct, total, duration_s, difficulty)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        (user_id, score_pct, correct, total, duration_s, difficulty),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_user_stats(user_id: int) -> tuple:
+    conn = get_users_db()
+    history = conn.execute(
+        "SELECT score_pct, correct, total, duration_s, difficulty, played_at"
+        " FROM quiz_results WHERE user_id = ? ORDER BY played_at DESC LIMIT 20",
+        (user_id,),
+    ).fetchall()
+    agg = conn.execute(
+        "SELECT COUNT(*), MAX(score_pct), ROUND(AVG(score_pct)),"
+        "       MIN(duration_s), ROUND(AVG(duration_s))"
+        " FROM quiz_results WHERE user_id = ?",
+        (user_id,),
+    ).fetchone()
+    conn.close()
+    return history, agg
 
 
 def get_user_by_username(username: str) -> dict | None:
@@ -166,6 +211,8 @@ def start():
     session["quiz_index"]        = 0
     session["quiz_total"]        = len(question_ids)
     session["quiz_results"]      = []
+    session["quiz_start"]        = int(time.time())
+    session["quiz_difficulty"]   = difficulty
     return redirect(url_for("question"))
 
 
@@ -247,11 +294,24 @@ def summary():
     total         = len(results)
     pct           = round(correct_count / total * 100)
     message       = get_score_message(pct)
-    for key in ("quiz_question_ids", "quiz_index", "quiz_results", "quiz_total"):
+    if session.get("user_id"):
+        duration_s = int(time.time()) - session.get("quiz_start", int(time.time()))
+        save_quiz_result(session["user_id"], pct, correct_count, total,
+                         duration_s, session.get("quiz_difficulty", "any"))
+    for key in ("quiz_question_ids", "quiz_index", "quiz_results", "quiz_total",
+                "quiz_start", "quiz_difficulty"):
         session.pop(key, None)
     return render_template("summary.html", results=results,
                            correct_count=correct_count, total=total,
                            pct=pct, message=message)
+
+
+@app.route("/stats")
+def stats():
+    if not session.get("user_id"):
+        return redirect(url_for("login"))
+    history, agg = get_user_stats(session["user_id"])
+    return render_template("stats.html", history=history, agg=agg)
 
 
 # ---------------------------------------------------------------------------

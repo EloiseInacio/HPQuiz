@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}⚡ HP Quiz — My Stats{% endblock %}
+
+{% block content %}
+<h1 class="text-3xl font-bold text-yellow-400 mb-8">My Stats</h1>
+
+{% set count = agg[0] if agg else 0 %}
+
+{% if count == 0 %}
+<div class="text-center py-16 text-gray-500">
+  <p class="text-5xl mb-4">📊</p>
+  <p class="text-lg">No quizzes played yet.</p>
+  <a href="/" class="mt-6 inline-block px-6 py-2 bg-yellow-400 hover:bg-yellow-300
+                     text-gray-950 font-bold rounded-xl transition-colors">
+    Play your first quiz ✨
+  </a>
+</div>
+
+{% else %}
+
+{% macro fmt_time(s) %}
+  {%- set s = s | int -%}
+  {%- if s >= 60 -%}{{ (s // 60) }}m {{ s % 60 }}s{%- else -%}{{ s }}s{%- endif -%}
+{% endmacro %}
+
+<!-- Summary cards -->
+<div class="grid grid-cols-2 sm:grid-cols-3 gap-4 mb-10">
+
+  <div class="bg-gray-800 rounded-2xl p-5 border border-gray-700 text-center">
+    <p class="text-xs text-gray-500 uppercase tracking-widest mb-1">Quizzes played</p>
+    <p class="text-4xl font-bold text-yellow-400">{{ count }}</p>
+  </div>
+
+  <div class="bg-gray-800 rounded-2xl p-5 border border-gray-700 text-center">
+    <p class="text-xs text-gray-500 uppercase tracking-widest mb-1">Best score</p>
+    <p class="text-4xl font-bold text-green-400">{{ agg[1] }}%</p>
+  </div>
+
+  <div class="bg-gray-800 rounded-2xl p-5 border border-gray-700 text-center">
+    <p class="text-xs text-gray-500 uppercase tracking-widest mb-1">Average score</p>
+    <p class="text-4xl font-bold text-gray-200">{{ agg[2] | int }}%</p>
+  </div>
+
+  <div class="bg-gray-800 rounded-2xl p-5 border border-gray-700 text-center">
+    <p class="text-xs text-gray-500 uppercase tracking-widest mb-1">Best time</p>
+    <p class="text-3xl font-bold text-blue-400">{{ fmt_time(agg[3]) }}</p>
+  </div>
+
+  <div class="bg-gray-800 rounded-2xl p-5 border border-gray-700 text-center">
+    <p class="text-xs text-gray-500 uppercase tracking-widest mb-1">Avg time</p>
+    <p class="text-3xl font-bold text-gray-200">{{ fmt_time(agg[4]) }}</p>
+  </div>
+
+</div>
+
+<!-- Recent history -->
+<h2 class="text-sm font-semibold text-gray-400 uppercase tracking-widest mb-4">Recent quizzes</h2>
+
+<div class="overflow-x-auto rounded-xl border border-gray-700">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="bg-gray-800 text-gray-400 uppercase tracking-widest text-xs">
+        <th class="px-4 py-3 text-left">Date</th>
+        <th class="px-4 py-3 text-left">Difficulty</th>
+        <th class="px-4 py-3 text-center">Score</th>
+        <th class="px-4 py-3 text-center">Time</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-700">
+      {% for r in history %}
+      <tr class="bg-gray-900 hover:bg-gray-800 transition-colors">
+        <td class="px-4 py-3 text-gray-400 text-xs">{{ r["played_at"][:16] }}</td>
+        <td class="px-4 py-3">
+          {% set d = r["difficulty"] %}
+          <span class="text-xs px-2 py-0.5 rounded-full capitalize
+            {% if d == 'easy' %}bg-green-900 text-green-300
+            {% elif d == 'medium' %}bg-yellow-900 text-yellow-300
+            {% elif d == 'hard' %}bg-red-900 text-red-300
+            {% else %}bg-gray-700 text-gray-300{% endif %}">
+            {{ d }}
+          </span>
+        </td>
+        <td class="px-4 py-3 text-center font-semibold
+                   {% if r['score_pct'] >= 80 %}text-green-400
+                   {% elif r['score_pct'] >= 50 %}text-yellow-300
+                   {% else %}text-red-400{% endif %}">
+          {{ r["correct"] }}/{{ r["total"] }} &nbsp; {{ r["score_pct"] }}%
+        </td>
+        <td class="px-4 py-3 text-center text-gray-400">{{ fmt_time(r["duration_s"]) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% endif %}
+{% endblock %}
